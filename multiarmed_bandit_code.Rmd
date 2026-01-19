@@ -1,6 +1,6 @@
 ---
 title: Code For Final
-author: QDDF2 
+author: Micah Gerstner 
 ---
 
 Hypothesis 1. Participants learn to make more advantageous choices in the multi-armed bandit task, which will be evidenced by participants choosing the optimal (“H”) option more often in later compared to earlier (blocks of) trials.
