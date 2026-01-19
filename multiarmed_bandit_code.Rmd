@@ -1,0 +1,368 @@
+---
+title: Code For Final
+author: QDDF2 
+---
+
+Hypothesis 1. Participants learn to make more advantageous choices in the multi-armed bandit task, which will be evidenced by participants choosing the optimal (“H”) option more often in later compared to earlier (blocks of) trials.
+
+```{r, init, echo=FALSE}
+library(ggplot2)
+library(sdamr)
+library(afex)
+library(tidyverse)
+library(codingMatrices)
+library(car)
+library(effectsize)
+library(emmeans)
+library(magrittr)
+library(psych)
+library(lavaan)
+library(semPlot)
+library(semptools)
+knitr::write_bib(.packages(), "packages.bib")
+
+
+options(es.use_symbols = TRUE) # get nice symbols when printing! (On Windows, requires R >= 4.2.0)
+# Read data in 
+wdat <- read.csv("data_10.csv")
+ldat <- read.csv("data_10_task.csv")
+
+```
+
+# Hypothesis 1 Simple
+In simple terms, this hypothesis expects that there is a linear increase in H as trials increase.
+
+
+```{r, data-shaping}
+# pivot wide format to long
+dat <-  tidyr::pivot_longer(wdat,
+    cols = starts_with("optimal"),
+    names_to = "block",
+    names_prefix = "optimal_",
+    values_to = "optimal",
+    values_drop_na = TRUE
+  )
+# make the tibble smaller
+dat <- dplyr::select(dat,ID,condition,block,optimal,digit_span,age)
+# subset the data
+dat <- subset(dat, block != "total")
+dat$block <- as.factor(dat$block)
+dat$ID <- as.factor(dat$ID)
+contrasts(dat$block) <- contr.diff(6)
+```
+
+```{r data_explore}
+plot_raincloud(data=dat,y=optimal, groups=block) +
+              ggtitle('Proportion of Optimal Choice Selection by Block')
+```
+
+```{r model1}
+# first, an anova model which predicts the proportion of optimal choices from
+# block using difference coding.
+
+
+mod1 <- lm(optimal ~ block, data=dat)
+summary(mod1)
+mean_contrasts(contr.diff(6))
+eta_squared(mod1)
+car::Anova(mod1,type=3)
+
+#levene test
+car::leveneTest(mod1)
+vars <- aggregate(optimal ~ block, data=dat, FUN="var")
+max(vars[,2])/min(vars[,2])
+
+# adjust
+emmeans(mod1, specs = ~block, adjust="scheffe")
+
+
+#plots
+ggplot(data.frame(predicted=predict(mod1), residual=residuals(mod1)), aes(x=predicted,y=residual)) +
+  geom_jitter(width=.1, alpha=.5) + # jittered scatterplot
+  geom_hline(yintercept=0,lty=3)
+ggplot(data.frame(residual=residuals(mod1)),aes(x=residual)) + geom_histogram(bins=20, colour="black")
+```
+
+```{r mod2}
+# Model 2 introduces a random effect based on ID to compensate for individual variance
+# contrasts(dat$ID) <- contr.sum(880)
+mod2 <- afex::mixed(optimal ~ 1+ block + (1|ID), data=dat, check_contrasts = FALSE, test_intercept = TRUE, method="KR")
+mod2
+summary(mod2)
+
+# analysis
+eta_squared(mod2$full_model)
+car::Anova(mod2$full_model,type=3)
+confint(mod2$full_model)
+
+ggplot(data.frame(predicted=predict(mod2$full_model), residual=residuals(mod2$full_model)), aes(x=predicted,y=residual)) +
+  geom_jitter(width=.1, alpha=.5) + # jittered scatterplot
+  geom_hline(yintercept=0,lty=3)
+ggplot(data.frame(residual=residuals(mod2$full_model)),aes(x=residual)) + geom_histogram(bins=20, colour="black")
+```
+
+Hypothesis 2. The distancing intervention improves participants’ learning in the multi-armed bandit
+task, which will be evidenced by participants in the intervention condition choosing the optimal
+(“H”) option more often than in the control condition.
+
+```{r visual-eyes}
+plot_raincloud(data=dat,y=optimal, groups=condition) +
+              ggtitle('Proportion of Optimal Choice Selection by Condition')
+plot_raincloud(data=dat,y=optimal, groups=condition) + facet_wrap(dat$block) +
+              ggtitle('Proportion of Optimal Choice Selection by Block and Condition')
+```
+
+Expect to see increase in block 5 & 6 in treatment vs condition
+
+```{r hyp2-mod1}
+contrasts(dat$block) <- contr.sum(6)
+dat$condition <- as.factor(dat$condition)
+contrasts(dat$condition) <- cbind(c(-0.5,0.5))
+mod3simple <- lm(optimal ~ 1 + block*condition, data=dat)
+summary(mod3simple)
+car::Anova(mod3simple,type=3)
+confint(mod3simple)
+eta_squared(mod3simple)
+mod3 <- afex::mixed(optimal ~ 1 + block*condition + (1|ID), data=dat, check_contrasts = FALSE, test_intercept = TRUE, method="KR")
+mod3
+summary(mod3)
+car::Anova(mod3$full_model,type=3)
+eta_squared(mod3$full_model)
+```
+
+Indicates that condition likely has a mediated effect
+
+```{r simplemodel}
+simpreg1 <- lm(optimal ~ condition, data=dat)
+summary(simpreg1)
+eta_squared(simpreg1)
+confint(simpreg1)
+leveneTest(simpreg1)
+plot(simpreg1)
+
+```
+
+Hypothesis 3. The distancing intervention impacts on participants’ affective reactions in the reward
+learning task. In particular, participants are expected to report more positive affect after obtaining a
+reward to when the reward is absent, but the effect of reward on affect is expected to be smaller for
+those participants who received the distancing intervention.
+
+affect -> condition
+
+```{r hyp3-exp}
+dat <- dplyr::select(wdat,ID,condition,affect_reward_total, affect_noreward_total, digit_span)
+dat$condition <- as.factor(dat$condition)
+dat$ID <- as.factor(dat$ID)
+contrasts(dat$condition) <- cbind(c(0.5,-0.5))
+mod5 <- lm(affect_reward_total ~ condition, data=dat)
+summary(mod5)
+car::Anova(mod5, type=3)
+
+#levene test
+car::leveneTest(mod5)
+```
+
+```{r hyp3-reshape-data}
+# pivot wide format to long, creating a reward_status factor
+dat <-  tidyr::pivot_longer(dat,
+    cols = starts_with("affect_"),
+    names_to = "reward_status",
+    names_prefix = "affect_",
+    values_to = "affect",
+    values_drop_na = TRUE
+  )
+# renames data for legibility
+dat["reward_status"][dat["reward_status"] == 'reward_total'] <- 'reward'
+dat["reward_status"][dat["reward_status"] == 'noreward_total'] <- 'noreward'
+# create factors
+dat$reward_status <- as.factor(dat$reward_status)
+# expect to see reward increase affect
+contrasts(dat$reward_status) <- cbind(c(-0.5,0.5))
+# ID for mixed effect model later
+contrasts(dat$ID) <- contr.sum(880)
+# expect to see decrease in treatment condition
+dat$condition <- as.factor(dat$condition)
+contrasts(dat$condition) <- cbind(c(0.5,-0.5))
+```
+
+```{r hyp3-explore}
+plot_raincloud(dat,affect, groups=condition) + facet_wrap(dat$reward_status) +
+  ggtitle('Affect Rating Based on Reward and Condition')
+```
+
+```{r hyp3_mod6}
+mod6 <- lm(affect ~ condition*reward_status, data=dat)
+summary(mod6)
+car::Anova(mod6, type=3)
+eta_squared(mod6)
+emmeans(mod6, specs=~reward_status, adjust="scheffe")
+ems <- emmeans::emmeans(mod6, specs=pairwise~condition*reward_status)
+emmeans::contrast(ems, 
+         method = list(c1 = c(-1/2, -1/2, 1/2, 1/2), #reward
+                       c2 = c(1/2, -1/2, 1/2, -1/2),
+                       c3 = c(0, -1/2, 0, 1/2), #reward in treatment
+                       c4 = c(-1/2, 0, 1/2, 0), #reward in control
+                       c5 = c(1/2, -1/2, 0, 0),
+                       c6 = c(0, 0, 1/2, -1/2)),
+         adjust="scheffe")
+plot(mod6)
+mod6cd <- cooks.distance(mod6)
+summary(mod6cd)
+dat[which(mod6cd > 1)]
+```
+
+```{r hyp3-mixed}
+dat$digit_span <- center(dat$digit_span)
+mod7 <- afex::mixed(affect ~ condition*reward_status*digit_span+(1|ID), data=dat, check_contrasts = FALSE, test_intercept = TRUE, method="KR")
+mod7
+summary(mod7)
+eta_squared(mod7)
+
+mod7b <- lm(affect~condition*reward_status*digit_span, data=dat)
+summary(mod7b)
+eta_squared(mod7b)
+
+```
+Hypothesis 4. Answers to various questionnaire items relate to three general transdiagnostic
+symptom dimensions: (1) anxiety/depression, (2) compulsive behaviour and intrusive thought, and
+(3) social withdrawal. In particular, items of the SDS, STAI, AES and DARS questionnaires are
+expected to load on a latent anxiety/depression factor, items of the OCI-R and EAT questionnaires
+are expected to load on the compulsive behaviour and intrusive thought factor, and items of the LSAS and the interpersonal scale of the SPQ are expected to load on the social withdrawal factor.
+Assess whether this hypothesis of three underlying transdiagnostic symptom dimensions indeed
+provides a reasonable representation of the interrelations between the items/scales.
+
+
+```{r efa}
+
+#create new tibble
+dat <- select(wdat,starts_with(c("ID","SDS_","AES_","STAI_","OCI_", "EAT_",
+                                        "DARS_", "LSAS_", "SPQ_", 
+                                 "affect_reward_total", "affect_noreward_total")))
+depdat <- select(dat,starts_with(c("SDS_","AES_","STAI_","DARS_")))
+
+# adjustment to ensure that an increase in DARS score indicates an increase in trait
+dat %<>% mutate(across(starts_with("DARS_"), ~ abs(.x -16), .names = "{.col}R"))
+wdat %<>% mutate(across(starts_with("DARS_"), ~ abs(.x -16), .names = "{.col}R"))
+
+```
+
+
+```{r sem}
+modspec <- '
+SDS =~ SDS_1 + SDS_11 + SDS_12 + SDS_14 + SDS_16 + SDS_17 + SDS_18 + SDS_20
+AES =~ AES_17 + AES_18
+STAI =~ STAI_1 + STAI_3 + STAI_4 + STAI_5 + STAI_8 + STAI_10 + STAI_12 + 
+        STAI_13 + STAI_15 + STAI_16 + STAI_17 + STAI_19 + STAI_20
+DARS =~ DARS_hobbiesR + DARS_food_drinkR + DARS_socialR + DARS_sensoryR
+OCI =~ OCI_2 + OCI_3 + OCI_4 + OCI_5 + OCI_6 + OCI_7 + OCI_8 +OCI_9 + OCI_11 +
+       OCI_12 + OCI_13 + OCI_14 + OCI_15 + OCI_16 + OCI_18
+EAT =~ EAT_1 + EAT_2 + EAT_3 + EAT_4 + EAT_6 + EAT_7 + EAT_8 + EAT_10 + EAT_11 + 
+       EAT_12 + EAT_14 + EAT_15 + EAT_18 + EAT_20 + EAT_21 + EAT_22 + EAT_23 + 
+       EAT_24
+LSAS =~ LSAS_2 + LSAS_6 + LSAS_7 + LSAS_8 + LSAS_9 + LSAS_10 + LSAS_11 + 
+        LSAS_12 + LSAS_15 + LSAS_16 + LSAS_18 + LSAS_19 + LSAS_20 + LSAS_21 + 
+        LSAS_23 + LSAS_24
+
+
+da =~ SDS + DARS + AES + STAI
+cbit =~ EAT + OCI
+swf =~ LSAS + SPQ_interpersonal
+       
+# tdcrit =~ swf + cbit + da
+
+'
+
+tdcritmod <- lavaan::cfa(modspec, data=dat)
+summary(tdcritmod, fit.measures=TRUE, standardized=TRUE)
+```
+
+```{r semplot}
+plt <- semPlot::semPaths(tdcritmod, whatLabels = "est", nCharNodes = 0, mar = c(8,6,8,6), DoNotPlot = TRUE)
+
+# define a layout matrix for the latent factors
+layout_mat <- matrix(NA, nrow=7, ncol=6)
+layout_mat[1,1] <- "SDS"
+layout_mat[3,1] <- "AES"
+layout_mat[5,1] <- "DARS"
+layout_mat[7,1] <- "STAI"
+layout_mat[4,3] <- "da"
+layout_mat[1,5] <- "EAT"
+layout_mat[5,6] <- "OCI"
+layout_mat[4,5] <- "cbit"
+layout_mat[6,4] <- "swf"
+layout_mat[7,6] <- "LSAS"
+
+# define a similar matrix, but now for each latent factor
+# indicating where the indicators should be placed relative 
+# to them (e.g. above (up), below (down), or to the left or right)
+ind_layout_mat <- matrix(NA, nrow=7, ncol=6)
+ind_layout_mat[1,1] <- "up"
+ind_layout_mat[3,1] <- "left"
+ind_layout_mat[5,1] <- "left"
+ind_layout_mat[7,1] <- "down"
+ind_layout_mat[1,5] <- "up"
+ind_layout_mat[5,6] <- "right"
+ind_layout_mat[6,4] <- "left"
+ind_layout_mat[7,6] <- "down"
+
+# an indicator push vector indicates the distance of the indicators
+# to the latent factors
+indicator_push <- c(SDS = 3, AES = 2, STAI = 3.5, DARS = 3, da = 2.5, EAT = 3.5, OCI =3, cbit = 2, swf=2, LSAS= 3)
+
+# the indicator spread vector is used to indicate how far apart
+# the indicators should be
+indicator_spread <- c(SDS = 3.5, AES = 3, STAI = 3.5, DARS = 3.5, da = 3.5, EAT = 4, OCI = 5, cbit = 3.5, swf = 3.5, LSAS=5)
+
+# we can now use all these as arguments to the semptools::set_sem_layout()
+# function
+plt <- semptools::set_sem_layout(plt, factor_layout=layout_mat, factor_point_to = ind_layout_mat, indicator_push = indicator_push, indicator_spread = indicator_spread)
+
+plot(plt)
+```
+
+
+```{r sem2}
+modspec <- '
+
+da =~ SDS_1 + SDS_11 + SDS_12 + SDS_14 + SDS_16 + SDS_17 + SDS_18 + SDS_20 + 
+      DARS_hobbiesR + DARS_food_drinkR + DARS_socialR + DARS_sensoryR + AES_17 + 
+      AES_18 + STAI_1 + STAI_3 + STAI_4 + STAI_5 + STAI_8 + STAI_10 + STAI_12 + 
+        STAI_13 + STAI_15 + STAI_16 + STAI_17 + STAI_19 + STAI_20
+        
+cbit =~ OCI_2 + OCI_3 + OCI_4 + OCI_5 + OCI_6 + OCI_7 + OCI_8 +OCI_9 + OCI_11 +
+        OCI_12 + OCI_13 + OCI_14 + OCI_15 + OCI_16 + OCI_18 + EAT_1 + EAT_2 + 
+        EAT_3 + EAT_4 + EAT_6 + EAT_7 + EAT_8 + EAT_10 + EAT_11 + EAT_12 + 
+        EAT_14 + EAT_15 + EAT_18 + EAT_20 + EAT_21 + EAT_22 + EAT_23 + EAT_24
+
+swf =~ LSAS_2 + LSAS_6 + LSAS_7 + LSAS_8 + LSAS_9 + LSAS_10 + LSAS_11 + 
+       LSAS_12 + LSAS_15 + LSAS_16 + LSAS_18 + LSAS_19 + LSAS_20 + LSAS_21 + 
+      LSAS_23 + LSAS_24 + SPQ_interpersonal
+       
+# tdcrit =~ swf + cbit + da
+
+'
+
+tdcritmod2 <- lavaan::cfa(modspec, data=dat)
+summary(tdcritmod2, fit.measures=TRUE)
+anova(tdcritmod2,tdcritmod)
+```
+
+
+
+```{r parallel}
+dat %<>% select(starts_with(c("SDS_","AES_","STAI_","OCI_", "EAT_",
+                              "LSAS_", "SPQ_",
+                              "DARS_hobbiesR", "DARS_food_drinkR", "DARS_socialR",
+                              "DARS_sensoryR")))
+# efa
+psych::fa.parallel(dat, fa="both")
+```
+
+```{r efa2}
+# promax chosen bc scores should be related to each other
+far <- psych::fa(dat, nfactors = 10, rotate="promax", fm="ml")
+# far
+farloadings <-loadings(far, cutoff=.2)
+farloadings
+```
+
